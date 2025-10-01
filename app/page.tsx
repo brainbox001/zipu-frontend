@@ -1,103 +1,226 @@
-import Image from "next/image";
+// app/page.tsx
+"use client";
+import { useState, useRef, useEffect } from "react";
+import { RiArrowUpCircleFill, RiStopFill } from "react-icons/ri";
+import Markdown from "react-markdown";
+import http from "./config/axios";
+import API_URL from "./config/api_url";
 
-export default function Home() {
+export default function ChatPage() {
+  const [chats, setChats] = useState<any>({});
+  const [message, setMessage] = useState<any>("");
+  const [loading, setLoading] = useState(true);
+  const [resStage, setResStage] = useState("");
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const getUserChats = async () => {
+      try {
+        let url: string;
+        const thread_id = localStorage.getItem("thread_id");
+        url = !thread_id ? "/chat" : `/chat?thread_id=${thread_id}`;
+
+        const res = await http.get(url);
+        if (res.status == 200) {
+          !thread_id &&
+            localStorage.setItem("thread_id", res.data["thread_id"]);
+          setChats(res.data);
+          console.log(res.data);
+        } else {
+          setChats([]);
+        }
+      } catch (error: any) {
+        console.log(error);
+      } finally {
+        setLoading(false);
+      }
+    };
+    getUserChats();
+  }, []);
+
+  useEffect(() => {
+    scrollRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chats.data]);
+
+  const handleMessageSubmit = async (e: any) => {
+    e.preventDefault();
+    const thread_id = localStorage.getItem("thread_id");
+    let res: any;
+
+    let user_input = { type: "human", content: message };
+    setChats((prev: any) => ({
+      ...prev,
+      data: [...prev.data, user_input],
+    }));
+
+    setMessage("");
+    setResStage("start");
+
+    try {
+      res = await fetch(`${API_URL}/chat?thread_id=${thread_id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          input: {
+            messages: [
+              {
+                role: "user",
+                content: user_input.content,
+              },
+            ],
+            context: [],
+          },
+        }),
+      });
+    } catch (error) {
+      console.log(error);
+    }
+
+    const reader = res.body?.getReader();
+    const decoder = new TextDecoder();
+
+    while (true) {
+      const { done, value } = await reader!.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+
+      chunk.split("\n").forEach((line) => {
+        if (line.startsWith("data: ")) {
+          const jsonStr = line.replace("data: ", "").trim();
+          if (jsonStr && jsonStr !== "[DONE]") {
+            try {
+              const obj = JSON.parse(jsonStr);
+              if (obj.brain) setResStage("brain");
+              else if (obj.tools) setResStage("tools");
+              else setResStage("");
+              const response = obj.response;
+              if (response) {
+                setChats((prev: any) => ({
+                  ...prev,
+                  data: [...prev.data, response.messages?.[0]],
+                }));
+              }
+            } catch (e) {
+              console.error("Parse error:", jsonStr);
+            }
+          }
+        }
+      });
+    }
+  };
+
+  const handleClearThread = () => {
+    localStorage.removeItem("thread_id");
+    // or localStorage.clear();
+    window.location.reload();
+  };
+
   return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+    <div className="relative min-h-screen flex flex-col">
+      <div className="flex items-center justify-between mx-6 my-4">
+        <h1 className="text-sky-600 font-semibold">Zipu</h1>
+        <button
+          onClick={handleClearThread}
+          className="ml-4 px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded-md text-sm focus:outline-none"
+        >
+          Clear Thread
+        </button>
+      </div>
+      <div className="flex flex-col gap-4 px-4 pt-4 mb-48">
+        {!loading ? (
+          chats.data?.length > 0 ? (
+            chats.data
+              .filter((msg: any) => msg.content.trim() !== "")
+              .map((msg: any, idx: number) => (
+                <div
+                  key={idx}
+                  className={`flex p-2 ${
+                    msg.type == "human" ? "justify-end" : "justify-center"
+                  }`}
+                >
+                  <div
+                    className={`${
+                      msg.type == "human"
+                        ? "bg-gray-200 px-3 py-2 rounded-xl max-w-[80%] sm:max-w-[70%] md:max-w-[60%]"
+                        : ""
+                    }`}
+                  >
+                    <Markdown>{msg.content}</Markdown>
+                  </div>
+                </div>
+              ))
+          ) : (
+            <h2 className="flex justify-center h-64 items-center text-xl font-semibold">
+              What can I help you with?
+            </h2>
+          )
+        ) : (
+          <Spinner />
+        )}
+        {resStage && (
+          <div
+            ref={scrollRef}
+            className="flex gap-2 items-center font-semibold"
+          >
+            <Spinner custom={true} />
+            {resStage === "brain" && <div>Thinking</div>}
+            {resStage === "tools" && <div>Wait a few more seconds</div>}
+          </div>
+        )}
+      </div>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
+      <div className="fixed bottom-0 left-0 w-full bg-white backdrop-blur-md p-4">
+        <form
+          className="w-full flex justify-center"
+          onSubmit={handleMessageSubmit}
         >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+          <div className="w-full sm:w-[80%] md:w-[70%] flex justify-center">
+            <div className="w-[85%] md:w-[90%]">
+              <input
+                type="text"
+                name="no-autocomplete-user-input"
+                autoComplete="off"
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                id="user-input"
+                className="w-full border-t border-b-2 border-l border-r-none border-gray-300 outline-none p-5 rounded-l-full bg-white"
+                placeholder="Type your message..."
+              />
+            </div>
+            <div className="w-[15%] md:w-[10%] flex justify-center border-t border-b-2 border-r rounded-r-full border-gray-300">
+              <button
+                type="submit"
+                className="cursor-pointer"
+                disabled={loading || !message || !!resStage}
+              >
+                {!resStage ? (
+                  <RiArrowUpCircleFill
+                    size={48}
+                    color={`${loading || !message ? "gray" : "black"}`}
+                  />
+                ) : (
+                  <RiStopFill size={48} color="black" />
+                )}
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+export function Spinner({ custom = false }: { custom?: boolean }) {
+  return (
+    <div className={`flex ${!custom && "items-center justify-center"} p-4`}>
+      <div
+        className={`${
+          custom
+            ? "h-8 w-8 border-white border-t-[#010847] border-b-[#012b12]"
+            : "h-10 w-10 border-gray-100 border-t-gray-700"
+        } animate-spin rounded-full border-4`}
+      ></div>
     </div>
   );
 }
