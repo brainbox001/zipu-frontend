@@ -91,14 +91,23 @@ export default function ChatPage() {
           if (jsonStr && jsonStr !== "[DONE]") {
             try {
               const obj = JSON.parse(jsonStr);
-              if (obj.brain) setResStage("brain");
-              else if (obj.tools) setResStage("tools");
+              // console.log("Object:", obj);
+              if (obj.tools) setResStage("tools");
               else setResStage("");
               const response = obj.response;
-              if (response) {
+              const brain = obj.brain;
+
+              if (response && response.messages?.[0].content) {
                 setChats((prev: any) => ({
                   ...prev,
                   data: [...prev.data, response.messages?.[0]],
+                }));
+              }
+
+              else if (brain && brain.messages?.[0].content) {
+                setChats((prev: any) => ({
+                  ...prev,
+                  data: [...prev.data, brain.messages?.[0]],
                 }));
               }
             } catch (e) {
@@ -151,7 +160,7 @@ export default function ChatPage() {
                 </div>
               ))
           ) : (
-            <h2 className="flex justify-center h-64 items-center text-xl font-semibold">
+            <h2 className="flex justify-center h-64 items-center text-xl font-semibold">  
               What can I help you with?
             </h2>
           )
@@ -164,7 +173,6 @@ export default function ChatPage() {
             className="flex gap-2 items-center font-semibold"
           >
             <Spinner custom={true} />
-            {resStage === "brain" && <div>Thinking</div>}
             {resStage === "tools" && <div>Wait a few more seconds</div>}
           </div>
         )}
